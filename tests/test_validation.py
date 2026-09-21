@@ -12,7 +12,12 @@ from validation import validate_parameters  # noqa: E402
 class ValidationTests(unittest.TestCase):
     def test_valid_configuration(self):
         self.assertEqual([], validate_parameters(
-            "phase2Abc123", "10.254.254.2", "255.255.255.0",
+            "oran-vlan-stage2", "10.254.254.2", "255.255.255.0",
+            "10.254.254.1", 32222))
+
+    def test_portal_unicode_values_are_accepted(self):
+        self.assertEqual([], validate_parameters(
+            "oran-vlan-stage2", "10.254.254.2", "255.255.255.0",
             "10.254.254.1", 32222))
 
     def test_blank_vlan_name_is_rejected(self):
