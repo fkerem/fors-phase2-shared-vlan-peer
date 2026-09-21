@@ -4,13 +4,13 @@ import ipaddress
 import re
 
 
-VLAN_NAME_RE = re.compile(r"^[A-Za-z0-9]{1,31}$")
+VLAN_NAME_RE = re.compile(r"\A[A-Za-z0-9]{1,31}\Z")
 
 
 def validate_parameters(shared_vlan_name, peer_ip, netmask, owner_ip, e2_port):
     errors = []
 
-    if not VLAN_NAME_RE.fullmatch(shared_vlan_name or ""):
+    if not VLAN_NAME_RE.match(shared_vlan_name or ""):
         errors.append(("shared_vlan_name", "must contain 1-31 alphanumeric characters"))
 
     try:
