@@ -10,31 +10,51 @@ from validation import validate_parameters
 
 UBUNTU_IMAGE = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD"
 COMPONENT_MANAGER = "urn:publicid:IDN+emulab.net+authority+cm"
+DEFAULT_PEER_IP = "10.254.254.2"
+DEFAULT_NETMASK = "255.255.255.0"
 
 pc = portal.Context()
 pc.defineParameter(
+    "enable_shared_vlan_peer", "Enable the shared-VLAN peer",
+    portal.ParameterType.BOOLEAN, False,
+    longDescription=(
+        "Leave disabled while importing or previewing the profile. Enable only "
+        "when instantiating with an authorized private shared VLAN."))
+pc.defineParameter(
     "shared_vlan_name", "Existing private shared VLAN name",
     portal.ParameterType.STRING, "",
-    longDescription="Required. Treat this random name as a secret and do not commit it.")
+    longDescription=(
+        "Required when the peer is enabled. Treat this random name as a secret "
+        "and do not commit it."))
 pc.defineParameter(
     "peer_ip", "Peer shared-VLAN IPv4 address",
-    portal.ParameterType.STRING, "10.254.254.2")
+    portal.ParameterType.STRING, DEFAULT_PEER_IP)
 pc.defineParameter(
     "shared_vlan_netmask", "Shared-VLAN netmask",
-    portal.ParameterType.STRING, "255.255.255.0")
+    portal.ParameterType.STRING, DEFAULT_NETMASK)
 pc.defineParameter(
     "owner_ip", "Owner shared-VLAN IPv4 address",
     portal.ParameterType.STRING, "",
-    longDescription="Required. This is the owner experiment's node-0 address.")
+    longDescription=(
+        "Required when the peer is enabled. This is the owner experiment's "
+        "node-0 address."))
 pc.defineParameter(
     "e2_node_port", "E2Term SCTP NodePort",
     portal.ParameterType.INTEGER, 32222)
 
 params = pc.bindParameters()
-for field, message in validate_parameters(
-        params.shared_vlan_name, params.peer_ip, params.shared_vlan_netmask,
-        params.owner_ip, params.e2_node_port):
-    pc.reportError(portal.ParameterError(message, [field]))
+peer_ip = params.peer_ip or DEFAULT_PEER_IP
+shared_vlan_netmask = params.shared_vlan_netmask or DEFAULT_NETMASK
+
+if params.enable_shared_vlan_peer:
+    for field, message in validate_parameters(
+            params.shared_vlan_name, peer_ip, shared_vlan_netmask,
+            params.owner_ip, params.e2_node_port):
+        pc.reportError(portal.ParameterError(message, [field]))
+elif params.shared_vlan_name or params.owner_ip:
+    pc.reportError(portal.ParameterError(
+        "must be enabled when shared-VLAN parameters are supplied",
+        ["enable_shared_vlan_peer"]))
 pc.verifyParameters()
 
 request = pc.makeRequestRSpec()
@@ -43,19 +63,20 @@ peer.component_manager_id = COMPONENT_MANAGER
 peer.hardware_type = "d430"
 peer.disk_image = UBUNTU_IMAGE
 
-vlan_if = peer.addInterface("shared-vlan-if")
-vlan_if.addAddress(rspec.IPv4Address(params.peer_ip, params.shared_vlan_netmask))
-vlan = request.Link("phase2-shared-vlan")
-vlan.addInterface(vlan_if)
-vlan.connectSharedVlan(params.shared_vlan_name)
+if params.enable_shared_vlan_peer:
+    vlan_if = peer.addInterface("shared-vlan-if")
+    vlan_if.addAddress(rspec.IPv4Address(peer_ip, shared_vlan_netmask))
+    vlan = request.Link("phase2-shared-vlan")
+    vlan.addInterface(vlan_if)
+    vlan.connectSharedVlan(params.shared_vlan_name)
 
-peer.addService(rspec.Execute(
-    shell="bash",
-    command=(
-        "sudo mkdir -p /local/logs && sudo chown $(id -u):$(id -g) /local/logs && "
-        "/local/repository/bin/preflight-e2.py --owner-ip '{}' --port '{}' "
-        "--expect-source '{}' --wait 120 --output /local/logs/e2-preflight.json"
-    ).format(params.owner_ip, params.e2_node_port, params.peer_ip)))
+    peer.addService(rspec.Execute(
+        shell="bash",
+        command=(
+            "sudo mkdir -p /local/logs && sudo chown $(id -u):$(id -g) /local/logs && "
+            "/local/repository/bin/preflight-e2.py --owner-ip '{}' --port '{}' "
+            "--expect-source '{}' --wait 120 --output /local/logs/e2-preflight.json"
+        ).format(params.owner_ip, params.e2_node_port, peer_ip)))
 
 tour = IG.Tour()
 tour.Description(IG.Tour.MARKDOWN, """
@@ -65,7 +86,12 @@ This one-node, non-RF profile validates cross-experiment routing and E2Term
 SCTP reachability before scarce OTA resources are reserved.
 """)
 tour.Instructions(IG.Tour.MARKDOWN, """
-Wait for the startup service to finish, then inspect:
+The profile defaults to a disabled preview state so POWDER can import it before
+runtime values exist. Before instantiation, enable `enable_shared_vlan_peer`
+and supply the authorized random `shared_vlan_name` and `owner_ip`. Do not
+instantiate the profile while it is disabled.
+
+After enabled instantiation, wait for the startup service to finish and inspect:
 
 ```
 cat /local/logs/e2-preflight.json
